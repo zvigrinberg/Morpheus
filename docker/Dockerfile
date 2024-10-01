@@ -70,6 +70,8 @@ ARG PYTHON_VER
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+
+
 # Remove the file which breaks apt caching since we will handle it ourselves. See
 # https://vsupalov.com/buildkit-cache-mount-dockerfile/
 RUN rm -f /etc/apt/apt.conf.d/docker-clean
@@ -115,7 +117,7 @@ COPY --from=condaforge/mambaforge:latest /opt/conda /opt/conda
 ENV PATH="${PATH}:/opt/conda/bin"
 
 # Install mamba to speed the solve up
-RUN --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
+RUN --mount=type=cache,id=conda_pkgs,mode=0777,target=/opt/conda/pkgs \
     conda config --set ssl_verify false &&\
     conda config --add pkgs_dirs /opt/conda/pkgs &&\
     # Install mamba, boa and git here. Conda build breaks with other git installs
@@ -128,7 +130,7 @@ FROM base as conda_env
 ARG MORPHEUS_ROOT_HOST
 
 # Create a base environment
-RUN --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
+RUN --mount=type=cache,id=conda_pkgs,mode=0777,target=/opt/conda/pkgs \
     # Create the environment and install as little dependencies as possible
     CONDA_ALWAYS_YES=true /opt/conda/bin/mamba create -n morpheus -c conda-forge  \
       python=${PYTHON_VER} && \
@@ -184,7 +186,7 @@ RUN --mount=type=cache,id=apt,target=/var/cache/apt \
 COPY . ./
 
 RUN --mount=type=cache,id=workspace_cache,target=/workspace/.cache,sharing=locked \
-    --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
+    --mount=type=cache,id=conda_pkgs,mode=0777,target=/opt/conda/pkgs \
     # Install git-lfs before running the build to avoid errors during conda build
     /opt/conda/bin/mamba install -y -n base -c conda-forge "git-lfs" &&\
     source activate base &&\
@@ -226,7 +228,7 @@ ARG CONDA_CHANNEL_ALIAS
 COPY ${MORPHEUS_ROOT_HOST}/conda/environments/dev_cuda-${CUDA_MAJOR_VER}${CUDA_MINOR_VER}_arch-x86_64.yaml ./conda/environments/dev.yaml
 
 # Update the morpheus environment
-RUN --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
+RUN --mount=type=cache,id=conda_pkgs,mode=0777,target=/opt/conda/pkgs \
     # Temp add channel_alias to get around conda 404 errors
     conda config --env --set channel_alias ${CONDA_CHANNEL_ALIAS} &&\
     /opt/conda/bin/conda env update --solver=libmamba -n morpheus --file conda/environments/dev.yaml &&\
@@ -262,7 +264,7 @@ RUN --mount=type=cache,id=apt,target=/var/cache/apt \
 COPY . ./
 
 RUN --mount=type=cache,id=workspace_cache,target=/workspace/.cache,sharing=locked \
-    --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
+    --mount=type=cache,id=conda_pkgs,mode=0777,target=/opt/conda/pkgs \
     # Install git-lfs before running the build to avoid errors during conda build
     /opt/conda/bin/mamba install -y -n base -c conda-forge "git-lfs" &&\
     source activate base &&\
@@ -284,7 +286,7 @@ COPY . ./
 
 RUN --mount=type=cache,id=workspace_cache,target=/workspace/.cache,sharing=locked \
     --mount=type=bind,from=conda_bld_morpheus,source=/opt/conda/conda-bld,target=/opt/conda/conda-bld \
-    --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
+    --mount=type=cache,id=conda_pkgs,mode=0777,target=/opt/conda/pkgs \
     source activate morpheus &&\
     CONDA_ALWAYS_YES=true /opt/conda/bin/mamba install -n morpheus \
         -c local \
@@ -313,10 +315,10 @@ COPY "${MORPHEUS_ROOT_HOST}/conda/environments/runtime_cuda-${CUDA_MAJOR_VER}${C
 
 # Mount Morpheus conda package build in `conda_bld_morpheus`
 RUN --mount=type=bind,from=conda_bld_morpheus,source=/opt/conda/conda-bld,target=/opt/conda/conda-bld \
-    --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
+    --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,mode=0777 \
     # CVE-2018-20225 for the base pip, not the env one
     # conda will ignore the request to remove pip
-    python -m pip uninstall -y pip && \
+    /opt/conda/bin/python${PYTHON_VER} -m pip uninstall -y pip && \
     source activate morpheus &&\
     # Install morpheus
     CONDA_ALWAYS_YES=true /opt/conda/bin/mamba install -n morpheus \
@@ -329,7 +331,7 @@ RUN --mount=type=bind,from=conda_bld_morpheus,source=/opt/conda/conda-bld,target
         -c nvidia/label/dev \
         -c pytorch \
         -c defaults \
-        morpheus && \
+        morpheus python=${PYTHON_VER} && \
     /opt/conda/bin/conda env update --solver=libmamba -n morpheus --file \
         conda/environments/runtime_cuda-${CUDA_MAJOR_VER}${CUDA_MINOR_VER}_arch-x86_64.yaml
 
@@ -343,11 +345,12 @@ ARG MORPHEUS_ROOT_HOST
 # Source the morpheus env to pick up the git-lfs package
 RUN --mount=type=bind,source=.,target=/opt/host_repo \
     source activate morpheus &&\
-    # Use a local clone to allow unpushed commits to be included
-    git clone file:///opt/host_repo/${MORPHEUS_ROOT_HOST} /tmp/morpheus_repo &&\
+    cd  /opt/host_repo/${MORPHEUS_ROOT_HOST} &&\
+    # Use a local clone to allow unpushed commits to be included \
+    git clone file://$(git rev-parse --show-toplevel) /tmp/morpheus_repo &&\
     cd /tmp/morpheus_repo &&\
-    git lfs install &&\
-    ./scripts/fetch_data.py fetch datasets examples
+    git lfs install
+#    ./scripts/fetch_data.py fetch datasets examples
 
 # ============ Stage: runtime ============
 # Setup container for runtime environment

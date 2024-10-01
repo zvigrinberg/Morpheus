@@ -21,7 +21,8 @@ package:
   version: {{ version }}
 
 source:
-  git_url: ../../../..
+  git_url: https://github.com/nv-morpheus/Morpheus.git
+  git_rev: branch-24.10
 
 outputs:
 
